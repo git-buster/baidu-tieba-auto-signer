@@ -29,6 +29,7 @@ CONTINUOUS_SIGN_TEXT = "\u8fde\u7eed"
 STREAK_SIGN_TEXT = "\u8fde\u7b7e"
 OLD_VERSION_TEXTS = ("\u65e7\u7248", "\u8001\u7248", "\u8fd4\u56de\u65e7\u7248")
 TAIL_PAGE_TEXT = "\u5c3e\u9875"
+NEXT_PAGE_TEXT = "\u4e0b\u4e00\u9875"
 
 
 class TiebaError(RuntimeError):
@@ -342,6 +343,10 @@ def parse_forums_from_html(html: str) -> list[Forum]:
     return forums
 
 
+def has_followed_forum_list(html: str) -> bool:
+    return BeautifulSoup(html, "html.parser").select_one("#like_pagelet") is not None
+
+
 def parse_followed_forum_total_pages(html: str) -> int | None:
     info = parse_followed_forum_pagination(html)
     if info is None:
@@ -437,11 +442,10 @@ def click_old_version_switch(page: Any) -> bool:
     return clicked
 
 
-def open_followed_forum_page(page: Any, page_number: int) -> str:
-    target_url = f"{FOLLOWED_FORUM_URL}?&pn={page_number}"
-    open_page(page, target_url, timeout=20, wait=8)
+def open_followed_forum_index(page: Any) -> str:
+    open_page(page, FOLLOWED_FORUM_URL, timeout=20, wait=8)
     html = page_html(page)
-    if BeautifulSoup(html, "html.parser").select_one("#like_pagelet"):
+    if has_followed_forum_list(html):
         return html
 
     progress("Old followed-forum list was not visible; trying to switch from the new Tieba UI.")
@@ -453,23 +457,73 @@ def open_followed_forum_page(page: Any, page_number: int) -> str:
         progress("Clicked old-version switch; reopening followed-forum list.")
     else:
         progress("Old-version switch was not found; reopening the old followed-forum URL directly.")
-    open_page(page, target_url, timeout=20, wait=8)
+    open_page(page, FOLLOWED_FORUM_URL, timeout=20, wait=8)
     return page_html(page)
 
 
-def verify_followed_forum_tail_page(page: Any, tail_url: str, reported_pages: int) -> int:
-    if not tail_url:
+def click_followed_forum_pagination(page: Any, page_number: int | None = None, text: str = "") -> bool:
+    page_number_js = "null" if page_number is None else str(page_number)
+    text_js = json.dumps(text, ensure_ascii=False)
+    script = f'''
+(() => {{
+  const pageNumber = {page_number_js};
+  const text = {text_js};
+  const pagelet = document.querySelector('#like_pagelet');
+  if (!pagelet) return false;
+  const links = [...pagelet.querySelectorAll('a[href*="pn="]')];
+  const target = links.find(link => {{
+    const href = link.getAttribute('href') || '';
+    const label = (link.innerText || link.textContent || '').trim();
+    const match = href.match(/[?&]pn=(\\d+)/);
+    if (pageNumber !== null && match && Number(match[1]) === pageNumber) return true;
+    return text && label.includes(text);
+  }});
+  if (!target) return false;
+  target.scrollIntoView({{block: 'center', inline: 'center'}});
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {{
+    target.dispatchEvent(new MouseEvent(type, {{bubbles: true, cancelable: true, view: window}}));
+  }}
+  return true;
+}})()
+'''
+    try:
+        clicked = bool(page.run_js(script))
+    except Exception:
+        clicked = False
+    if not clicked:
+        return False
+    time.sleep(1.5)
+    try:
+        page._wait_loaded(8)
+    except Exception:
+        pass
+    return has_followed_forum_list(page_html(page))
+
+
+def verify_followed_forum_tail_page(page: Any, reported_pages: int) -> int:
+    progress("Clicking tail page to verify followed forum page count...")
+    if not click_followed_forum_pagination(page, text=TAIL_PAGE_TEXT):
+        progress("Could not click the tail-page link; using the page count parsed from page 1.")
         return reported_pages
-    progress(f"Opening tail page to verify followed forum page count: {tail_url}")
-    open_page(page, tail_url, timeout=20, wait=8)
     html = page_html(page)
-    verified_pages = parse_pn_from_url(page_url(page)) or parse_pn_from_url(tail_url) or reported_pages
+    verified_pages = parse_pn_from_url(page_url(page)) or reported_pages
     pagination = parse_followed_forum_pagination(html)
     if pagination:
         verified_pages = max(verified_pages, int(pagination["total_pages"]))
     page_forums = parse_forums_from_html(html)
     progress(f"Tail page verified as page {verified_pages}; it contains {len(page_forums)} forum link(s).")
     return max(1, verified_pages)
+
+
+def open_next_followed_forum_page(page: Any, page_number: int) -> str:
+    progress(f"Clicking followed forum pagination to page {page_number}...")
+    if click_followed_forum_pagination(page, page_number=page_number):
+        return page_html(page)
+    if click_followed_forum_pagination(page, text=NEXT_PAGE_TEXT):
+        return page_html(page)
+    progress(f"Could not click page {page_number}; falling back to the old followed-forum URL.")
+    open_page(page, f"{FOLLOWED_FORUM_URL}?&pn={page_number}", timeout=20, wait=8)
+    return page_html(page)
 
 
 def collect_followed_forums(page: Any) -> list[Forum]:
@@ -482,20 +536,20 @@ def collect_followed_forums(page: Any) -> list[Forum]:
     page_number = 1
     scan_pages = max_pages
 
+    html = open_followed_forum_index(page)
+    pagination = parse_followed_forum_pagination(html)
+    if pagination:
+        total_pages = int(pagination["total_pages"])
+        if str(pagination["tail_url"]) and total_pages > 1:
+            total_pages = verify_followed_forum_tail_page(page, total_pages)
+            html = open_followed_forum_index(page)
+        scan_pages = min(max_pages, total_pages)
+        progress(f"Followed forum list reports {total_pages} page(s); scanning {scan_pages}.")
+    else:
+        progress(f"Could not read followed forum pagination; scanning up to {scan_pages} page(s).")
+
     while page_number <= scan_pages:
         progress(f"Scanning followed forum page {page_number}/{scan_pages}...")
-        html = open_followed_forum_page(page, page_number)
-        if page_number == 1:
-            pagination = parse_followed_forum_pagination(html)
-            if pagination:
-                total_pages = int(pagination["total_pages"])
-                tail_url = str(pagination["tail_url"])
-                if tail_url and total_pages > 1:
-                    total_pages = verify_followed_forum_tail_page(page, tail_url, total_pages)
-                scan_pages = min(max_pages, total_pages)
-                progress(f"Followed forum list reports {total_pages} page(s); scanning {scan_pages}.")
-            else:
-                progress(f"Could not read followed forum pagination; scanning up to {scan_pages} page(s).")
         page_forums = parse_forums_from_html(html)
         progress(f"Page {page_number} found {len(page_forums)} forum link(s).")
 
@@ -505,6 +559,9 @@ def collect_followed_forums(page: Any) -> list[Forum]:
                 progress(f"Stopping forum scan after {empty_pages} empty page(s).")
                 break
             page_number += 1
+            if page_number <= scan_pages:
+                sleep_between_actions()
+                html = open_next_followed_forum_page(page, page_number)
             continue
         empty_pages = 0
 
@@ -515,8 +572,10 @@ def collect_followed_forums(page: Any) -> list[Forum]:
                 if max_forums and len(forums) >= max_forums:
                     progress(f"Reached TIEBA_MAX_FORUMS={max_forums}.")
                     return forums
-        sleep_between_actions()
         page_number += 1
+        if page_number <= scan_pages:
+            sleep_between_actions()
+            html = open_next_followed_forum_page(page, page_number)
     return forums
 
 
@@ -541,16 +600,49 @@ def already_signed(page: Any) -> bool:
     return False
 
 
-def find_sign_button(page: Any) -> Any | None:
+def detect_forum_ui(page: Any) -> str:
+    html = page_html(page)
+    if "follow-sign" in html or "operate-btn" in html:
+        return "new"
+    if "signstar_wrapper" in html or "j_signbtn" in html or "j_cansign" in html:
+        return "old"
+    for selector, ui_name in (
+        ("css:.follow-sign", "new"),
+        ("css:.operate-btn", "new"),
+        ("css:#signstar_wrapper", "old"),
+        ("css:.j_signbtn", "old"),
+    ):
+        try:
+            if page.ele(selector, timeout=1):
+                return ui_name
+        except Exception:
+            continue
+    return "unknown"
+
+
+def find_old_ui_sign_button(page: Any) -> Any | None:
     selectors = (
-        "css:.follow-sign",
         'xpath://a[contains(@class, "j_signbtn") and not(contains(@class, "sign_btn_signed"))]',
         'xpath://a[contains(@class, "sign_btn_bright")]',
         'xpath://a[contains(@class, "j_cansign")]',
         'xpath://*[@id="signstar_wrapper"]//a[contains(@class, "sign")]',
         f'xpath://a[contains(text(), "{SIGN_TEXT}")]',
-        f'xpath://span[contains(text(), "{SIGN_TEXT}")]/parent::a',
+    )
+    for selector in selectors:
+        try:
+            element = page.ele(selector, timeout=2)
+        except Exception:
+            element = None
+        if element and SIGN_TEXT in safe_text(element) and not text_indicates_signed(safe_text(element)):
+            return element
+    return None
+
+
+def find_new_ui_sign_button(page: Any) -> Any | None:
+    selectors = (
+        "css:.follow-sign",
         f'xpath://div[contains(text(), "{SIGN_TEXT}")]/ancestor::*[contains(@class, "operate-btn")][1]',
+        f'xpath://span[contains(text(), "{SIGN_TEXT}")]/ancestor::*[contains(@class, "operate-btn")][1]',
     )
     for selector in selectors:
         try:
@@ -595,7 +687,7 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
     for attempt in range(1, retries + 1):
         progress(f"Signing {forum.name} (attempt {attempt}/{retries})...")
         try:
-            target_url = forum.url or f"{BASE_TIEBA_URL}/f?kw={quote(forum.name)}"
+            target_url = f"{BASE_TIEBA_URL}/f?kw={quote(forum.name)}&ie=utf-8"
             open_page(page, target_url, timeout=20, wait=8)
         except Exception as exc:
             last_message = f"page load failed: {exc}"
@@ -608,29 +700,73 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
         if already_signed(page):
             return SignResult(forum.name, True, "already signed")
 
-        button = find_sign_button(page)
-        if button:
-            try:
-                button.click()
-                time.sleep(2.5)
-                if already_signed(page):
-                    return SignResult(forum.name, True, "signed")
-                page.refresh()
-                page._wait_loaded(8)
-                if already_signed(page):
-                    return SignResult(forum.name, True, "signed")
-            except Exception as exc:
-                last_message = f"click failed: {exc}"
-            else:
-                last_message = "clicked but sign state was not confirmed"
-        else:
-            if click_new_ui_sign_button(page):
+        ui = detect_forum_ui(page)
+        progress(f"{forum.name} forum page UI detected: {ui}.")
+
+        if ui == "new":
+            button = find_new_ui_sign_button(page)
+            if button:
+                try:
+                    button.click()
+                    time.sleep(2.5)
+                    if already_signed(page):
+                        return SignResult(forum.name, True, "signed")
+                    page.refresh()
+                    page._wait_loaded(8)
+                    if already_signed(page):
+                        return SignResult(forum.name, True, "signed")
+                except Exception as exc:
+                    last_message = f"new UI click failed: {exc}"
+                else:
+                    last_message = "new UI clicked but sign state was not confirmed"
+            elif click_new_ui_sign_button(page):
                 time.sleep(2.5)
                 if already_signed(page):
                     return SignResult(forum.name, True, "signed")
                 last_message = "new UI sign click was sent but sign state was not confirmed"
             else:
-                last_message = "sign button not found"
+                last_message = "new UI sign button not found"
+        elif ui == "old":
+            button = find_old_ui_sign_button(page)
+            if not button:
+                last_message = "old UI sign button not found"
+            else:
+                try:
+                    button.click()
+                    time.sleep(2.5)
+                    if already_signed(page):
+                        return SignResult(forum.name, True, "signed")
+                    page.refresh()
+                    page._wait_loaded(8)
+                    if already_signed(page):
+                        return SignResult(forum.name, True, "signed")
+                except Exception as exc:
+                    last_message = f"old UI click failed: {exc}"
+                else:
+                    last_message = "old UI clicked but sign state was not confirmed"
+        else:
+            button = find_new_ui_sign_button(page) or find_old_ui_sign_button(page)
+            if button:
+                try:
+                    button.click()
+                    time.sleep(2.5)
+                    if already_signed(page):
+                        return SignResult(forum.name, True, "signed")
+                    page.refresh()
+                    page._wait_loaded(8)
+                    if already_signed(page):
+                        return SignResult(forum.name, True, "signed")
+                except Exception as exc:
+                    last_message = f"unknown UI click failed: {exc}"
+                else:
+                    last_message = "unknown UI clicked but sign state was not confirmed"
+            elif click_new_ui_sign_button(page):
+                time.sleep(2.5)
+                if already_signed(page):
+                    return SignResult(forum.name, True, "signed")
+                last_message = "unknown UI fallback click was sent but sign state was not confirmed"
+            else:
+                last_message = "forum UI and sign button not found"
 
         if attempt < retries:
             sleep_between_actions()
@@ -667,6 +803,7 @@ def sign_account(label: str, cookies: list[dict[str, Any]]) -> AccountResult:
             details.append(
                 f"{'OK' if result.ok else 'FAIL'} {result.forum}: {result.message}"
             )
+            progress(f"{'OK' if result.ok else 'FAIL'} {result.forum}: {result.message}")
             if index < len(forums):
                 sleep_between_actions()
 
