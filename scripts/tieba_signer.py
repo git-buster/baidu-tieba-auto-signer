@@ -73,7 +73,7 @@ def env_int(name: str, default: int, minimum: int | None = None) -> int:
     return value
 
 
-def parse_interval(value: str, default: str = "3-8") -> tuple[float, float]:
+def parse_interval(value: str, default: str = "2-4") -> tuple[float, float]:
     raw = (value or default).strip()
     match = re.fullmatch(r"(\d+(?:\.\d+)?)(?:\s*[-~]\s*(\d+(?:\.\d+)?))?", raw)
     if not match:
@@ -88,7 +88,7 @@ def parse_interval(value: str, default: str = "3-8") -> tuple[float, float]:
 
 
 def random_interval_seconds() -> float:
-    start, end = parse_interval(os.getenv("TIEBA_INTERVAL_SECONDS", "3-8"))
+    start, end = parse_interval(os.getenv("TIEBA_INTERVAL_SECONDS", "2-4"))
     if start == end:
         return start
     return random.uniform(start, end)

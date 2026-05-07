@@ -16,7 +16,7 @@ This project is inspired by [1dyer/Tieba_auto_sign](https://github.com/1dyer/Tie
 - 去掉 Server 酱通知功能，避免额外第三方出口。
 - 不依赖 BDUSS API 登录校验，优先使用浏览器 Cookie 方式。
 - 扫描关注贴吧时不限制 39 个，默认最多扫描 100 页，可配置。
-- 签到点击加入随机等待，默认每个吧间隔 3 到 8 秒。
+- 签到点击加入随机等待，默认每个吧间隔 2 到 4 秒。
 - 签到按钮使用多套选择器，兼容更多贴吧页面结构。
 - 支持 UTF-8 和 GBK 贴吧名解码，减少日志乱码。
 - GitHub Actions 输出签到摘要到 Step Summary。
@@ -92,7 +92,7 @@ Settings -> Secrets and variables -> Actions -> Variables
 | --- | --- | --- |
 | `TIEBA_MAX_PAGES` | `100` | 最多扫描多少页关注贴吧列表。 |
 | `TIEBA_MAX_FORUMS` | `0` | 最多签到多少个贴吧，`0` 表示不限制。 |
-| `TIEBA_INTERVAL_SECONDS` | `3-8` | 每个贴吧之间的等待秒数。可以写固定值 `3`，也可以写随机范围 `3-8`。 |
+| `TIEBA_INTERVAL_SECONDS` | `2-4` | 每个贴吧之间的等待秒数。可以写固定值 `2`，也可以写随机范围 `2-4`。 |
 | `TIEBA_SIGN_RETRIES` | `2` | 每个贴吧找按钮或点击失败时最多尝试次数。 |
 | `TIEBA_EMPTY_PAGES_TO_STOP` | `2` | 连续多少个空列表页后停止扫描。 |
 
@@ -130,7 +130,7 @@ Actions run -> Summary
 - 移除 Server 醬通知功能，減少第三方出口。
 - 不依賴 BDUSS API 登入檢查，優先使用瀏覽器 Cookie。
 - 掃描關注貼吧時不限制 39 個，預設最多掃描 100 頁，可自行設定。
-- 簽到點擊加入隨機等待，預設每個吧間隔 3 到 8 秒。
+- 簽到點擊加入隨機等待，預設每個吧間隔 2 到 4 秒。
 - 使用多組簽到按鈕選擇器，提高相容性。
 - 支援 UTF-8 和 GBK 貼吧名稱解碼，減少日誌亂碼。
 - GitHub Actions 會輸出簽到摘要到 Step Summary。
@@ -154,7 +154,7 @@ python -m scripts.export_cookies
 | --- | --- | --- |
 | `TIEBA_MAX_PAGES` | `100` | 最多掃描多少頁關注貼吧列表。 |
 | `TIEBA_MAX_FORUMS` | `0` | 最多簽到多少個貼吧，`0` 表示不限。 |
-| `TIEBA_INTERVAL_SECONDS` | `3-8` | 每個貼吧之間等待秒數，可用固定值或隨機範圍。 |
+| `TIEBA_INTERVAL_SECONDS` | `2-4` | 每個貼吧之間等待秒數，可用固定值或隨機範圍。 |
 | `TIEBA_SIGN_RETRIES` | `2` | 每個貼吧失敗時最多重試次數。 |
 | `TIEBA_EMPTY_PAGES_TO_STOP` | `2` | 連續多少個空列表頁後停止掃描。 |
 
@@ -193,7 +193,7 @@ Never commit `tieba_cookies.json` to a public repository.
 | --- | --- | --- |
 | `TIEBA_MAX_PAGES` | `100` | Max followed-forum pages to scan. |
 | `TIEBA_MAX_FORUMS` | `0` | Max forums to sign. `0` means unlimited. |
-| `TIEBA_INTERVAL_SECONDS` | `3-8` | Delay between forums. Supports fixed values or ranges. |
+| `TIEBA_INTERVAL_SECONDS` | `2-4` | Delay between forums. Supports fixed values or ranges. |
 | `TIEBA_SIGN_RETRIES` | `2` | Retry count per forum. |
 | `TIEBA_EMPTY_PAGES_TO_STOP` | `2` | Stop after this many empty followed-forum pages. |
 
