@@ -1,0 +1,2 @@
+DrissionPage==4.1.0.18
+beautifulsoup4==4.12.3

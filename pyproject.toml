@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "baidu-tieba-browser-signer"
+version = "1.0.0"
+description = "Baidu Tieba daily sign-in automation for GitHub Actions."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "DrissionPage==4.1.0.18",
+    "beautifulsoup4==4.12.3",
+]
+
+[project.scripts]
+baidu-tieba-auto-signer = "scripts.tieba_signer:main"
+baidu-tieba-export-cookies = "scripts.export_cookies:main"
+
+[tool.setuptools.packages.find]
+include = ["scripts*"]
