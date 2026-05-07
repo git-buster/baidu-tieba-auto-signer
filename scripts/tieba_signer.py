@@ -333,6 +333,21 @@ def parse_forums_from_html(html: str) -> list[Forum]:
     return forums
 
 
+def parse_followed_forum_total_pages(html: str) -> int | None:
+    soup = BeautifulSoup(html, "html.parser")
+    pagelet = soup.select_one("#like_pagelet")
+    if not pagelet:
+        return None
+
+    pages: list[int] = []
+    for link in pagelet.select('a[href*="pn="]'):
+        href = link.get("href") or ""
+        match = re.search(r"[?&]pn=(\d+)", href)
+        if match:
+            pages.append(int(match.group(1)))
+    return max(pages) if pages else None
+
+
 def collect_followed_forums(page: Any) -> list[Forum]:
     max_pages = env_int("TIEBA_MAX_PAGES", 100, minimum=1)
     max_forums = env_int("TIEBA_MAX_FORUMS", 0, minimum=0)
@@ -340,11 +355,19 @@ def collect_followed_forums(page: Any) -> list[Forum]:
     forums: list[Forum] = []
     seen: set[str] = set()
     empty_pages = 0
+    page_number = 1
+    scan_pages = max_pages
 
-    for page_number in range(1, max_pages + 1):
-        progress(f"Scanning followed forum page {page_number}/{max_pages}...")
+    while page_number <= scan_pages:
+        progress(f"Scanning followed forum page {page_number}/{scan_pages}...")
         open_page(page, f"{BASE_TIEBA_URL}/i/i/forum?&pn={page_number}", timeout=20, wait=8)
-        page_forums = parse_forums_from_html(page_html(page))
+        html = page_html(page)
+        if page_number == 1:
+            total_pages = parse_followed_forum_total_pages(html)
+            if total_pages:
+                scan_pages = min(max_pages, total_pages)
+                progress(f"Followed forum list reports {total_pages} page(s); scanning {scan_pages}.")
+        page_forums = parse_forums_from_html(html)
         progress(f"Page {page_number} found {len(page_forums)} forum link(s).")
 
         if not page_forums:
@@ -352,6 +375,7 @@ def collect_followed_forums(page: Any) -> list[Forum]:
             if empty_pages >= empty_pages_to_stop:
                 progress(f"Stopping forum scan after {empty_pages} empty page(s).")
                 break
+            page_number += 1
             continue
         empty_pages = 0
 
@@ -363,6 +387,7 @@ def collect_followed_forums(page: Any) -> list[Forum]:
                     progress(f"Reached TIEBA_MAX_FORUMS={max_forums}.")
                     return forums
         sleep_between_actions()
+        page_number += 1
     return forums
 
 

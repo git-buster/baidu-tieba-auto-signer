@@ -15,7 +15,7 @@ This project is inspired by [1dyer/Tieba_auto_sign](https://github.com/1dyer/Tie
 
 - 去掉 Server 酱通知功能，避免额外第三方出口。
 - 不依赖 BDUSS API 登录校验，优先使用浏览器 Cookie 方式。
-- 扫描关注贴吧时不限制 39 个，默认最多扫描 100 页，可配置。
+- 通过旧版关注列表页读取真实尾页页码，不限制 39 个，默认最多扫描 100 页，可配置。
 - 签到点击加入随机等待，默认每个吧间隔 2 到 4 秒。
 - 签到按钮使用多套选择器，兼容更多贴吧页面结构。
 - 兼容新版贴吧页面的 `.follow-sign` 签到按钮和“连签”状态。
@@ -120,6 +120,7 @@ Actions run -> Summary
 - 如果签到过快容易失败，请把 `TIEBA_INTERVAL_SECONDS` 调大，例如 `6-15`。
 - 如果贴吧很多，请调大 `TIEBA_MAX_PAGES`，并给 workflow 保留足够时间。
 - public 仓库不要上传 Cookie、截图里的 Cookie、Action Secret、个人 Token。
+- 浏览器接管调试方法见 `BROWSER_DEBUG.md`。
 
 ---
 
@@ -133,7 +134,7 @@ Actions run -> Summary
 
 - 移除 Server 醬通知功能，減少第三方出口。
 - 不依賴 BDUSS API 登入檢查，優先使用瀏覽器 Cookie。
-- 掃描關注貼吧時不限制 39 個，預設最多掃描 100 頁，可自行設定。
+- 透過舊版關注列表頁讀取真實尾頁頁碼，不限制 39 個，預設最多掃描 100 頁，可自行設定。
 - 簽到點擊加入隨機等待，預設每個吧間隔 2 到 4 秒。
 - 使用多組簽到按鈕選擇器，提高相容性。
 - 相容新版貼吧頁面的 `.follow-sign` 簽到按鈕與「連簽」狀態。
@@ -175,7 +176,7 @@ The project is based on the browser-cookie idea from [1dyer/Tieba_auto_sign](htt
 
 - Removed ServerChan notification support to avoid extra third-party traffic.
 - Uses browser cookies instead of relying on BDUSS API login checks.
-- Scans followed forum pages beyond the old 39-forum limitation.
+- Reads the old followed-forum list tail page and scans beyond the old 39-forum limitation.
 - Adds configurable random delays between forums.
 - Uses multiple sign-button selectors for better page compatibility.
 - Supports the newer `.follow-sign` button and streak sign-in state.

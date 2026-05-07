@@ -1,5 +1,6 @@
 from scripts.tieba_signer import (
     decode_forum_name,
+    parse_followed_forum_total_pages,
     parse_forums_from_html,
     parse_interval,
     split_accounts,
@@ -57,3 +58,13 @@ def test_parse_ignores_non_followed_links() -> None:
 
 def test_new_ui_streak_text_means_signed() -> None:
     assert text_indicates_signed("连签1天")
+
+
+def test_parse_followed_forum_total_pages_from_tail_link() -> None:
+    html = """
+    <div id="like_pagelet">
+      <a href="/i/i/forum?&pn=2">2</a>
+      <a href="/i/i/forum?&pn=6">尾页</a>
+    </div>
+    """
+    assert parse_followed_forum_total_pages(html) == 6
