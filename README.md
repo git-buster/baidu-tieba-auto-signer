@@ -76,7 +76,8 @@ Name: TIEBA_COOKIES
 Secret: tieba_cookies.json 的完整内容
 ```
 
-如果有多个账号，可以用 `###` 或换行分隔多个 JSON。
+可以直接粘贴多行格式的完整 JSON。  
+如果有多个账号，请用 `###` 分隔多个完整 JSON，不要只用换行分隔。
 
 ### 可选 Variables
 
@@ -95,6 +96,8 @@ Settings -> Secrets and variables -> Actions -> Variables
 | `TIEBA_INTERVAL_SECONDS` | `2-4` | 每个贴吧之间的等待秒数。可以写固定值 `2`，也可以写随机范围 `2-4`。 |
 | `TIEBA_SIGN_RETRIES` | `2` | 每个贴吧找按钮或点击失败时最多尝试次数。 |
 | `TIEBA_EMPTY_PAGES_TO_STOP` | `2` | 连续多少个空列表页后停止扫描。 |
+
+如果你在 Variables 里手动设置了同名变量，Variables 会覆盖 workflow 里的默认值。例如 `TIEBA_INTERVAL_SECONDS` 如果还显示 `3-8`，请把这个 Variable 改成 `2-4` 或删除它。
 
 ### 手动运行
 
@@ -144,7 +147,7 @@ python -m pip install -r requirements.txt
 python -m scripts.export_cookies
 ```
 
-登入完成後，將產生的 `tieba_cookies.json` 完整內容複製到 private Action 倉庫的 `TIEBA_COOKIES` Secret。
+登入完成後，將產生的 `tieba_cookies.json` 完整內容複製到 private Action 倉庫的 `TIEBA_COOKIES` Secret。可以直接貼上多行 JSON；如果有多個帳號，請用 `###` 分隔多個完整 JSON。
 
 不要將 `tieba_cookies.json` 上傳到公開倉庫。
 
@@ -183,7 +186,7 @@ python -m pip install -r requirements.txt
 python -m scripts.export_cookies
 ```
 
-After logging in, copy the full content of `tieba_cookies.json` into your private workflow repository as the `TIEBA_COOKIES` secret.
+After logging in, copy the full content of `tieba_cookies.json` into your private workflow repository as the `TIEBA_COOKIES` secret. Multi-line JSON is supported. For multiple accounts, separate full JSON blocks with `###`.
 
 Never commit `tieba_cookies.json` to a public repository.
 

@@ -1,4 +1,4 @@
-from scripts.tieba_signer import decode_forum_name, parse_interval
+from scripts.tieba_signer import decode_forum_name, parse_interval, split_accounts
 
 
 def test_decode_utf8_forum_name() -> None:
@@ -15,3 +15,14 @@ def test_parse_fixed_interval() -> None:
 
 def test_parse_random_interval() -> None:
     assert parse_interval("8-3") == (3.0, 8.0)
+
+
+def test_multiline_json_cookie_is_single_account() -> None:
+    raw = """[
+  {
+    "name": "BDUSS",
+    "value": "example",
+    "domain": ".baidu.com"
+  }
+]"""
+    assert split_accounts(raw) == [raw]

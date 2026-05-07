@@ -142,7 +142,14 @@ def load_cookie_json(raw: str) -> list[dict[str, Any]]:
 
 
 def split_accounts(raw: str) -> list[str]:
-    return [part.strip() for part in re.split(r"[\r\n]+|#{3,}", raw) if part.strip()]
+    raw = raw.strip()
+    if not raw:
+        return []
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError:
+        return [part.strip() for part in re.split(r"#{3,}", raw) if part.strip()]
+    return [raw]
 
 
 def load_accounts() -> list[tuple[str, list[dict[str, Any]]]]:
