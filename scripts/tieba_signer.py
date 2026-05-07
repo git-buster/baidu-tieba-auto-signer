@@ -186,6 +186,8 @@ def create_page() -> Any:
     port = random.randint(9300, 9999)
     options = ChromiumOptions()
     options.headless(True)
+    options.set_load_mode("eager")
+    options.set_timeouts(base=8, page_load=20, script=8)
     for argument in (
         "--headless=new",
         "--no-sandbox",
@@ -214,6 +216,11 @@ def page_html(page: Any) -> str:
     return html() if callable(html) else str(html or "")
 
 
+def open_page(page: Any, url: str, timeout: int = 20, wait: int = 8) -> None:
+    page.get(url, retry=1, interval=1, timeout=timeout)
+    page._wait_loaded(wait)
+
+
 def safe_text(element: Any) -> str:
     if not element:
         return ""
@@ -233,10 +240,10 @@ def is_logged_in(page: Any) -> bool:
 
 
 def inject_cookies(page: Any, cookies: list[dict[str, Any]]) -> None:
-    page.get(BASE_TIEBA_URL)
+    open_page(page, BASE_TIEBA_URL, timeout=20, wait=8)
     page.set.cookies(cookies)
     page.refresh()
-    page._wait_loaded(15)
+    page._wait_loaded(8)
 
 
 def forum_from_link(link: Any) -> Forum | None:
@@ -268,49 +275,57 @@ def parse_forums_from_html(html: str) -> list[Forum]:
     soup = BeautifulSoup(html, "html.parser")
     forums: list[Forum] = []
     seen: set[str] = set()
-    selectors = [
-        '#like_pagelet a[href*="/f?kw="]',
-        '#like_pagelet a[href*="kw="]',
-        'a[href*="/f?kw="]',
-    ]
-    for selector in selectors:
-        for link in soup.select(selector):
-            href = link.get("href") or ""
-            if "kw=" not in href:
-                continue
-            if href.startswith("//"):
-                href = "https:" + href
-            elif href.startswith("/"):
-                href = BASE_TIEBA_URL + href
-            match = re.search(r"[?&]kw=([^&]+)", href)
-            title = (link.get("title") or "").strip()
-            text = link.get_text(" ", strip=True)
-            name = title or (decode_forum_name(match.group(1)) if match else "") or text
-            name = name.replace("吧", "").strip() if name.endswith("吧") else name.strip()
-            if name and name not in seen:
-                seen.add(name)
-                forums.append(Forum(name=name, url=href))
+    pagelet = soup.select_one("#like_pagelet")
+    if not pagelet:
+        return forums
+
+    rows = pagelet.select("table tbody tr")
+    candidates = []
+    if rows:
+        for row in rows:
+            link = row.select_one('td a[href*="/f?kw="], td a[href*="kw="]')
+            if link:
+                candidates.append(link)
+    else:
+        candidates = pagelet.select('a[href*="/f?kw="], a[href*="kw="]')
+
+    for link in candidates:
+        href = link.get("href") or ""
+        if "kw=" not in href:
+            continue
+        if href.startswith("//"):
+            href = "https:" + href
+        elif href.startswith("/"):
+            href = BASE_TIEBA_URL + href
+        match = re.search(r"[?&]kw=([^&]+)", href)
+        title = (link.get("title") or "").strip()
+        text = link.get_text(" ", strip=True)
+        name = title or (decode_forum_name(match.group(1)) if match else "") or text
+        name = name.replace("吧", "").strip() if name.endswith("吧") else name.strip()
+        if name and name not in seen:
+            seen.add(name)
+            forums.append(Forum(name=name, url=href))
     return forums
 
 
 def collect_followed_forums(page: Any) -> list[Forum]:
-    max_pages = env_int("TIEBA_MAX_PAGES", 50, minimum=1)
+    max_pages = env_int("TIEBA_MAX_PAGES", 100, minimum=1)
     max_forums = env_int("TIEBA_MAX_FORUMS", 0, minimum=0)
-    empty_pages_to_stop = env_int("TIEBA_EMPTY_PAGES_TO_STOP", 2, minimum=1)
+    empty_pages_to_stop = env_int("TIEBA_EMPTY_PAGES_TO_STOP", 1, minimum=1)
     forums: list[Forum] = []
     seen: set[str] = set()
     empty_pages = 0
 
     for page_number in range(1, max_pages + 1):
         progress(f"Scanning followed forum page {page_number}/{max_pages}...")
-        page.get(f"{BASE_TIEBA_URL}/i/i/forum?&pn={page_number}")
-        page._wait_loaded(15)
+        open_page(page, f"{BASE_TIEBA_URL}/i/i/forum?&pn={page_number}", timeout=20, wait=8)
         page_forums = parse_forums_from_html(page_html(page))
         progress(f"Page {page_number} found {len(page_forums)} forum link(s).")
 
         if not page_forums:
             empty_pages += 1
             if empty_pages >= empty_pages_to_stop:
+                progress(f"Stopping forum scan after {empty_pages} empty page(s).")
                 break
             continue
         empty_pages = 0
@@ -336,7 +351,7 @@ def already_signed(page: Any) -> bool:
         'xpath://span[contains(text(), "已签到")]',
     ):
         try:
-            element = page.ele(xpath, timeout=2)
+            element = page.ele(xpath, timeout=1)
         except Exception:
             element = None
         text = safe_text(element)
@@ -356,7 +371,7 @@ def find_sign_button(page: Any) -> Any | None:
     )
     for selector in selectors:
         try:
-            element = page.ele(selector, timeout=5)
+            element = page.ele(selector, timeout=2)
         except Exception:
             element = None
         if element:
@@ -368,9 +383,16 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
     retries = env_int("TIEBA_SIGN_RETRIES", 2, minimum=1)
     for attempt in range(1, retries + 1):
         progress(f"Signing {forum.name} (attempt {attempt}/{retries})...")
-        page.get(f"{BASE_TIEBA_URL}/f?kw={quote(forum.name)}")
-        page._wait_loaded(15)
-        time.sleep(1.2)
+        try:
+            target_url = forum.url or f"{BASE_TIEBA_URL}/f?kw={quote(forum.name)}"
+            open_page(page, target_url, timeout=20, wait=8)
+        except Exception as exc:
+            last_message = f"page load failed: {exc}"
+            if attempt < retries:
+                sleep_between_actions()
+                continue
+            return SignResult(forum.name, False, last_message)
+        time.sleep(0.8)
 
         if already_signed(page):
             return SignResult(forum.name, True, "already signed")
@@ -383,7 +405,7 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
                 if already_signed(page):
                     return SignResult(forum.name, True, "signed")
                 page.refresh()
-                page._wait_loaded(10)
+                page._wait_loaded(8)
                 if already_signed(page):
                     return SignResult(forum.name, True, "signed")
             except Exception as exc:

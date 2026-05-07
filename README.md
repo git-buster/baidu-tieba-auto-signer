@@ -95,7 +95,7 @@ Settings -> Secrets and variables -> Actions -> Variables
 | `TIEBA_MAX_FORUMS` | `0` | 最多签到多少个贴吧，`0` 表示不限制。 |
 | `TIEBA_INTERVAL_SECONDS` | `2-4` | 每个贴吧之间的等待秒数。可以写固定值 `2`，也可以写随机范围 `2-4`。 |
 | `TIEBA_SIGN_RETRIES` | `2` | 每个贴吧找按钮或点击失败时最多尝试次数。 |
-| `TIEBA_EMPTY_PAGES_TO_STOP` | `2` | 连续多少个空列表页后停止扫描。 |
+| `TIEBA_EMPTY_PAGES_TO_STOP` | `1` | 连续多少个空列表页后停止扫描。默认遇到第一个空关注列表页就停止，减少无效翻页。 |
 
 如果你在 Variables 里手动设置了同名变量，Variables 会覆盖 workflow 里的默认值。例如 `TIEBA_INTERVAL_SECONDS` 如果还显示 `3-8`，请把这个 Variable 改成 `2-4` 或删除它。
 
@@ -159,7 +159,7 @@ python -m scripts.export_cookies
 | `TIEBA_MAX_FORUMS` | `0` | 最多簽到多少個貼吧，`0` 表示不限。 |
 | `TIEBA_INTERVAL_SECONDS` | `2-4` | 每個貼吧之間等待秒數，可用固定值或隨機範圍。 |
 | `TIEBA_SIGN_RETRIES` | `2` | 每個貼吧失敗時最多重試次數。 |
-| `TIEBA_EMPTY_PAGES_TO_STOP` | `2` | 連續多少個空列表頁後停止掃描。 |
+| `TIEBA_EMPTY_PAGES_TO_STOP` | `1` | 連續多少個空列表頁後停止掃描。預設遇到第一個空關注列表頁就停止。 |
 
 ---
 
@@ -198,7 +198,7 @@ Never commit `tieba_cookies.json` to a public repository.
 | `TIEBA_MAX_FORUMS` | `0` | Max forums to sign. `0` means unlimited. |
 | `TIEBA_INTERVAL_SECONDS` | `2-4` | Delay between forums. Supports fixed values or ranges. |
 | `TIEBA_SIGN_RETRIES` | `2` | Retry count per forum. |
-| `TIEBA_EMPTY_PAGES_TO_STOP` | `2` | Stop after this many empty followed-forum pages. |
+| `TIEBA_EMPTY_PAGES_TO_STOP` | `1` | Stop after this many empty followed-forum pages. |
 
 ### License and Attribution
 
