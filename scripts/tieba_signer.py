@@ -21,6 +21,10 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
+SIGN_TEXT = "\u7b7e\u5230"
+SIGNED_TEXT = "\u5df2\u7b7e\u5230"
+CONTINUOUS_SIGN_TEXT = "\u8fde\u7eed"
+STREAK_SIGN_TEXT = "\u8fde\u7b7e"
 
 
 class TiebaError(RuntimeError):
@@ -176,12 +180,24 @@ def chromium_browser_path() -> str | None:
     return None
 
 
+def ensure_local_browser_proxy_bypass() -> None:
+    bypass = "localhost,127.0.0.1,::1"
+    for name in ("NO_PROXY", "no_proxy"):
+        current = os.getenv(name, "")
+        parts = [part.strip() for part in current.split(",") if part.strip()]
+        for host in bypass.split(","):
+            if host not in parts:
+                parts.append(host)
+        os.environ[name] = ",".join(parts)
+
+
 def create_page() -> Any:
     try:
         from DrissionPage import ChromiumOptions, ChromiumPage
     except ImportError as exc:
         raise TiebaError("DrissionPage is not installed.") from exc
 
+    ensure_local_browser_proxy_bypass()
     user_data_dir = tempfile.mkdtemp(prefix="tieba-browser-")
     port = random.randint(9300, 9999)
     options = ChromiumOptions()
@@ -228,6 +244,15 @@ def safe_text(element: Any) -> str:
         return str(element.text or "").strip()
     except Exception:
         return ""
+
+
+def text_indicates_signed(text: str) -> bool:
+    return (
+        SIGNED_TEXT in text
+        or CONTINUOUS_SIGN_TEXT in text
+        or STREAK_SIGN_TEXT in text
+        or "already signed" in text.lower()
+    )
 
 
 def is_logged_in(page: Any) -> bool:
@@ -343,40 +368,72 @@ def collect_followed_forums(page: Any) -> list[Forum]:
 
 def already_signed(page: Any) -> bool:
     html = page_html(page)
-    if any(marker in html for marker in ("已签到", "连续签到", "签到排名")):
+    if text_indicates_signed(html) or "\u7b7e\u5230\u6392\u540d" in html:
         return True
     for xpath in (
         'xpath://*[@id="signstar_wrapper"]/a/span[1]',
-        'xpath://span[contains(text(), "连续")]',
-        'xpath://span[contains(text(), "已签到")]',
+        f'xpath://span[contains(text(), "{CONTINUOUS_SIGN_TEXT}")]',
+        f'xpath://span[contains(text(), "{STREAK_SIGN_TEXT}")]',
+        f'xpath://span[contains(text(), "{SIGNED_TEXT}")]',
+        'css:.follow-sign',
     ):
         try:
             element = page.ele(xpath, timeout=1)
         except Exception:
             element = None
         text = safe_text(element)
-        if text.startswith("连续") or "已签到" in text:
+        if text_indicates_signed(text):
             return True
     return False
 
 
 def find_sign_button(page: Any) -> Any | None:
     selectors = (
+        "css:.follow-sign",
         'xpath://a[contains(@class, "j_signbtn") and not(contains(@class, "sign_btn_signed"))]',
         'xpath://a[contains(@class, "sign_btn_bright")]',
         'xpath://a[contains(@class, "j_cansign")]',
         'xpath://*[@id="signstar_wrapper"]//a[contains(@class, "sign")]',
-        'xpath://a[contains(text(), "签到")]',
-        'xpath://span[contains(text(), "签到")]/parent::a',
+        f'xpath://a[contains(text(), "{SIGN_TEXT}")]',
+        f'xpath://span[contains(text(), "{SIGN_TEXT}")]/parent::a',
+        f'xpath://div[contains(text(), "{SIGN_TEXT}")]/ancestor::*[contains(@class, "operate-btn")][1]',
     )
     for selector in selectors:
         try:
             element = page.ele(selector, timeout=2)
         except Exception:
             element = None
-        if element:
+        if element and SIGN_TEXT in safe_text(element) and not text_indicates_signed(safe_text(element)):
             return element
     return None
+
+
+def click_new_ui_sign_button(page: Any) -> bool:
+    script = r'''
+(() => {
+  const signText = '\u7b7e\u5230';
+  const signedWords = ['\u5df2\u7b7e\u5230', '\u8fde\u7eed', '\u8fde\u7b7e'];
+  const visible = el => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+  };
+  const candidates = [...document.querySelectorAll('.follow-sign, .operate-btn, .button-wrapper')]
+    .filter(el => visible(el) && (el.innerText || '').includes(signText))
+    .filter(el => !signedWords.some(word => (el.innerText || '').includes(word)));
+  const button = candidates[0];
+  if (!button) return false;
+  button.scrollIntoView({block: 'center', inline: 'center'});
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    button.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window}));
+  }
+  return true;
+})()
+'''
+    try:
+        return bool(page.run_js(script))
+    except Exception:
+        return False
 
 
 def sign_one_forum(page: Any, forum: Forum) -> SignResult:
@@ -413,7 +470,13 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
             else:
                 last_message = "clicked but sign state was not confirmed"
         else:
-            last_message = "sign button not found"
+            if click_new_ui_sign_button(page):
+                time.sleep(2.5)
+                if already_signed(page):
+                    return SignResult(forum.name, True, "signed")
+                last_message = "new UI sign click was sent but sign state was not confirmed"
+            else:
+                last_message = "sign button not found"
 
         if attempt < retries:
             sleep_between_actions()

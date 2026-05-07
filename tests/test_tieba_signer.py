@@ -3,6 +3,7 @@ from scripts.tieba_signer import (
     parse_forums_from_html,
     parse_interval,
     split_accounts,
+    text_indicates_signed,
 )
 
 
@@ -52,3 +53,7 @@ def test_parse_ignores_non_followed_links() -> None:
     <a href="/f?kw=%E5%B9%BF%E5%91%8A" title="广告">广告吧</a>
     """
     assert parse_forums_from_html(html) == []
+
+
+def test_new_ui_streak_text_means_signed() -> None:
+    assert text_indicates_signed("连签1天")

@@ -18,6 +18,7 @@ This project is inspired by [1dyer/Tieba_auto_sign](https://github.com/1dyer/Tie
 - 扫描关注贴吧时不限制 39 个，默认最多扫描 100 页，可配置。
 - 签到点击加入随机等待，默认每个吧间隔 2 到 4 秒。
 - 签到按钮使用多套选择器，兼容更多贴吧页面结构。
+- 兼容新版贴吧页面的 `.follow-sign` 签到按钮和“连签”状态。
 - 支持 UTF-8 和 GBK 贴吧名解码，减少日志乱码。
 - GitHub Actions 输出签到摘要到 Step Summary。
 
@@ -135,6 +136,7 @@ Actions run -> Summary
 - 掃描關注貼吧時不限制 39 個，預設最多掃描 100 頁，可自行設定。
 - 簽到點擊加入隨機等待，預設每個吧間隔 2 到 4 秒。
 - 使用多組簽到按鈕選擇器，提高相容性。
+- 相容新版貼吧頁面的 `.follow-sign` 簽到按鈕與「連簽」狀態。
 - 支援 UTF-8 和 GBK 貼吧名稱解碼，減少日誌亂碼。
 - GitHub Actions 會輸出簽到摘要到 Step Summary。
 
@@ -176,6 +178,7 @@ The project is based on the browser-cookie idea from [1dyer/Tieba_auto_sign](htt
 - Scans followed forum pages beyond the old 39-forum limitation.
 - Adds configurable random delays between forums.
 - Uses multiple sign-button selectors for better page compatibility.
+- Supports the newer `.follow-sign` button and streak sign-in state.
 - Supports UTF-8 and GBK forum-name decoding.
 - Writes a GitHub Actions Step Summary after each run.
 
