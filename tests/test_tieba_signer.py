@@ -1,8 +1,10 @@
 from scripts.tieba_signer import (
     decode_forum_name,
+    parse_followed_forum_pagination,
     parse_followed_forum_total_pages,
     parse_forums_from_html,
     parse_interval,
+    parse_pn_from_url,
     split_accounts,
     text_indicates_signed,
 )
@@ -68,3 +70,31 @@ def test_parse_followed_forum_total_pages_from_tail_link() -> None:
     </div>
     """
     assert parse_followed_forum_total_pages(html) == 6
+
+
+def test_parse_followed_forum_pagination_prefers_tail_url() -> None:
+    html = """
+    <div id="like_pagelet">
+      <a href="/i/i/forum?&pn=2">2</a>
+      <a href="/i/i/forum?&pn=6">尾页</a>
+    </div>
+    """
+    assert parse_followed_forum_pagination(html) == {
+        "total_pages": 6,
+        "tail_url": "https://tieba.baidu.com/i/i/forum?&pn=6",
+    }
+
+
+def test_single_followed_forum_page_reports_one_page() -> None:
+    html = """
+    <div id="like_pagelet">
+      <table><tbody>
+        <tr><td><a href="/f?kw=test" title="test">test</a></td></tr>
+      </tbody></table>
+    </div>
+    """
+    assert parse_followed_forum_total_pages(html) == 1
+
+
+def test_parse_pn_from_url() -> None:
+    assert parse_pn_from_url("https://tieba.baidu.com/i/i/forum?&pn=12") == 12

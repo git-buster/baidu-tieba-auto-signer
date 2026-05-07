@@ -119,8 +119,7 @@ Actions run -> Summary
 - Cookie 有效期取决于百度账号状态，失效后需要重新导出。
 - 如果签到过快容易失败，请把 `TIEBA_INTERVAL_SECONDS` 调大，例如 `6-15`。
 - 如果贴吧很多，请调大 `TIEBA_MAX_PAGES`，并给 workflow 保留足够时间。
-- public 仓库不要上传 Cookie、截图里的 Cookie、Action Secret、个人 Token。
-- 浏览器接管调试方法见 `BROWSER_DEBUG.md`。
+- public 仓库不要上传 Cookie、截图里的 Cookie 或 Action Secret。
 
 ---
 

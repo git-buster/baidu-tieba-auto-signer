@@ -16,6 +16,8 @@ from bs4 import BeautifulSoup
 
 
 BASE_TIEBA_URL = "https://tieba.baidu.com"
+FOLLOWED_FORUM_PATH = "/i/i/forum"
+FOLLOWED_FORUM_URL = f"{BASE_TIEBA_URL}{FOLLOWED_FORUM_PATH}"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -25,6 +27,8 @@ SIGN_TEXT = "\u7b7e\u5230"
 SIGNED_TEXT = "\u5df2\u7b7e\u5230"
 CONTINUOUS_SIGN_TEXT = "\u8fde\u7eed"
 STREAK_SIGN_TEXT = "\u8fde\u7b7e"
+OLD_VERSION_TEXTS = ("\u65e7\u7248", "\u8001\u7248", "\u8fd4\u56de\u65e7\u7248")
+TAIL_PAGE_TEXT = "\u5c3e\u9875"
 
 
 class TiebaError(RuntimeError):
@@ -237,6 +241,11 @@ def open_page(page: Any, url: str, timeout: int = 20, wait: int = 8) -> None:
     page._wait_loaded(wait)
 
 
+def page_url(page: Any) -> str:
+    url = getattr(page, "url", "")
+    return str(url() if callable(url) else url or "")
+
+
 def safe_text(element: Any) -> str:
     if not element:
         return ""
@@ -334,18 +343,133 @@ def parse_forums_from_html(html: str) -> list[Forum]:
 
 
 def parse_followed_forum_total_pages(html: str) -> int | None:
+    info = parse_followed_forum_pagination(html)
+    if info is None:
+        return None
+    return info["total_pages"]
+
+
+def normalize_tieba_url(href: str) -> str:
+    href = href.strip()
+    if href.startswith("//"):
+        return "https:" + href
+    if href.startswith("/"):
+        return BASE_TIEBA_URL + href
+    return href
+
+
+def parse_pn_from_url(url: str) -> int | None:
+    match = re.search(r"[?&]pn=(\d+)", url)
+    return int(match.group(1)) if match else None
+
+
+def parse_followed_forum_pagination(html: str) -> dict[str, Any] | None:
     soup = BeautifulSoup(html, "html.parser")
     pagelet = soup.select_one("#like_pagelet")
     if not pagelet:
         return None
 
     pages: list[int] = []
+    tail_url = ""
     for link in pagelet.select('a[href*="pn="]'):
         href = link.get("href") or ""
-        match = re.search(r"[?&]pn=(\d+)", href)
-        if match:
-            pages.append(int(match.group(1)))
-    return max(pages) if pages else None
+        page_number = parse_pn_from_url(href)
+        if page_number:
+            pages.append(page_number)
+        if TAIL_PAGE_TEXT in link.get_text(" ", strip=True) and href:
+            tail_url = normalize_tieba_url(href)
+
+    total_pages = max(pages) if pages else 1
+    if not tail_url and pages:
+        for link in pagelet.select('a[href*="pn="]'):
+            href = link.get("href") or ""
+            if parse_pn_from_url(href) == total_pages:
+                tail_url = normalize_tieba_url(href)
+                break
+    return {"total_pages": total_pages, "tail_url": tail_url}
+
+
+def click_old_version_switch(page: Any) -> bool:
+    for text in OLD_VERSION_TEXTS:
+        for selector in (
+            f'xpath://a[contains(text(), "{text}")]',
+            f'xpath://button[contains(text(), "{text}")]',
+            f'xpath://*[contains(text(), "{text}") and (@role="button" or contains(@class, "button"))]',
+        ):
+            try:
+                element = page.ele(selector, timeout=1)
+            except Exception:
+                element = None
+            if element:
+                try:
+                    element.click()
+                    time.sleep(1.5)
+                    return True
+                except Exception:
+                    continue
+
+    script = r'''
+(() => {
+  const labels = ['\u65e7\u7248', '\u8001\u7248', '\u8fd4\u56de\u65e7\u7248'];
+  const visible = el => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+  };
+  const nodes = [...document.querySelectorAll('a, button, [role="button"], span, div')]
+    .filter(el => visible(el) && labels.some(label => (el.innerText || el.textContent || '').includes(label)));
+  const node = nodes[0];
+  if (!node) return false;
+  const target = node.closest('a, button, [role="button"]') || node;
+  target.scrollIntoView({block: 'center', inline: 'center'});
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window}));
+  }
+  return true;
+})()
+'''
+    try:
+        clicked = bool(page.run_js(script))
+    except Exception:
+        clicked = False
+    if clicked:
+        time.sleep(1.5)
+    return clicked
+
+
+def open_followed_forum_page(page: Any, page_number: int) -> str:
+    target_url = f"{FOLLOWED_FORUM_URL}?&pn={page_number}"
+    open_page(page, target_url, timeout=20, wait=8)
+    html = page_html(page)
+    if BeautifulSoup(html, "html.parser").select_one("#like_pagelet"):
+        return html
+
+    progress("Old followed-forum list was not visible; trying to switch from the new Tieba UI.")
+    try:
+        open_page(page, BASE_TIEBA_URL, timeout=20, wait=8)
+    except Exception:
+        pass
+    if click_old_version_switch(page):
+        progress("Clicked old-version switch; reopening followed-forum list.")
+    else:
+        progress("Old-version switch was not found; reopening the old followed-forum URL directly.")
+    open_page(page, target_url, timeout=20, wait=8)
+    return page_html(page)
+
+
+def verify_followed_forum_tail_page(page: Any, tail_url: str, reported_pages: int) -> int:
+    if not tail_url:
+        return reported_pages
+    progress(f"Opening tail page to verify followed forum page count: {tail_url}")
+    open_page(page, tail_url, timeout=20, wait=8)
+    html = page_html(page)
+    verified_pages = parse_pn_from_url(page_url(page)) or parse_pn_from_url(tail_url) or reported_pages
+    pagination = parse_followed_forum_pagination(html)
+    if pagination:
+        verified_pages = max(verified_pages, int(pagination["total_pages"]))
+    page_forums = parse_forums_from_html(html)
+    progress(f"Tail page verified as page {verified_pages}; it contains {len(page_forums)} forum link(s).")
+    return max(1, verified_pages)
 
 
 def collect_followed_forums(page: Any) -> list[Forum]:
@@ -360,13 +484,18 @@ def collect_followed_forums(page: Any) -> list[Forum]:
 
     while page_number <= scan_pages:
         progress(f"Scanning followed forum page {page_number}/{scan_pages}...")
-        open_page(page, f"{BASE_TIEBA_URL}/i/i/forum?&pn={page_number}", timeout=20, wait=8)
-        html = page_html(page)
+        html = open_followed_forum_page(page, page_number)
         if page_number == 1:
-            total_pages = parse_followed_forum_total_pages(html)
-            if total_pages:
+            pagination = parse_followed_forum_pagination(html)
+            if pagination:
+                total_pages = int(pagination["total_pages"])
+                tail_url = str(pagination["tail_url"])
+                if tail_url and total_pages > 1:
+                    total_pages = verify_followed_forum_tail_page(page, tail_url, total_pages)
                 scan_pages = min(max_pages, total_pages)
                 progress(f"Followed forum list reports {total_pages} page(s); scanning {scan_pages}.")
+            else:
+                progress(f"Could not read followed forum pagination; scanning up to {scan_pages} page(s).")
         page_forums = parse_forums_from_html(html)
         progress(f"Page {page_number} found {len(page_forums)} forum link(s).")
 
