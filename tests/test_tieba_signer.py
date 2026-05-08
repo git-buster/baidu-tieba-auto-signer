@@ -1,4 +1,5 @@
 from scripts.tieba_signer import (
+    cookie_login_hint,
     decode_forum_name,
     html_indicates_signed,
     parse_followed_forum_pagination,
@@ -36,6 +37,16 @@ def test_multiline_json_cookie_is_single_account() -> None:
   }
 ]"""
     assert split_accounts(raw) == [raw]
+
+
+def test_cookie_login_hint_reports_missing_bduss() -> None:
+    hint = cookie_login_hint([{"name": "BAIDUID", "value": "example"}])
+    assert "BDUSS" in hint
+
+
+def test_cookie_login_hint_reports_rejected_login_cookie() -> None:
+    hint = cookie_login_hint([{"name": "BDUSS", "value": "example"}])
+    assert "rejected" in hint
 
 
 def test_parse_followed_forums_from_like_table() -> None:

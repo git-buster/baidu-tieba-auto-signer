@@ -172,6 +172,19 @@ def load_accounts() -> list[tuple[str, list[dict[str, Any]]]]:
     return accounts
 
 
+def cookie_login_hint(cookies: list[dict[str, Any]]) -> str:
+    names = {str(cookie.get("name") or "") for cookie in cookies}
+    if not ({"BDUSS", "BDUSS_BFESS"} & names):
+        return (
+            "Cookie JSON is missing BDUSS/BDUSS_BFESS; export cookies again from a "
+            "browser that is already logged in to Baidu Tieba."
+        )
+    return (
+        "The cookie names look like login cookies, but Baidu rejected this session; "
+        "refresh TIEBA_COOKIES from the currently logged-in browser."
+    )
+
+
 def chromium_browser_path() -> str | None:
     for name in (
         "chromium-browser",
@@ -843,6 +856,8 @@ def sign_account(label: str, cookies: list[dict[str, Any]]) -> AccountResult:
         inject_cookies(page, cookies)
         if not is_logged_in(page):
             details.append("Cookie was injected, but Tieba still looks logged out.")
+            details.append(cookie_login_hint(cookies))
+            return AccountResult(label, False, "not logged in after cookie injection", details)
 
         forums = collect_followed_forums(page)
         details.append(f"Found {len(forums)} followed forum(s).")
