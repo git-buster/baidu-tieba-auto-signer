@@ -33,6 +33,7 @@ TAIL_PAGE_TEXT = "\u5c3e\u9875"
 NEXT_PAGE_TEXT = "\u4e0b\u4e00\u9875"
 SIGNED_CLASS_MARKERS = ("signstar_signed", "sign_box_bright_signed", "sign_btn_signed")
 DIAGNOSTICS_DIR = os.getenv("TIEBA_DIAGNOSTICS_DIR", "tieba_diagnostics")
+DEFAULT_FOLLOWED_FORUM_WAIT_SECONDS = 15
 SECURITY_MARKERS = (
     "\u767e\u5ea6\u5b89\u5168\u9a8c\u8bc1",
     "\u5b89\u5168\u9a8c\u8bc1",
@@ -263,6 +264,57 @@ def page_html(page: Any) -> str:
 def open_page(page: Any, url: str, timeout: int = 20, wait: int = 8) -> None:
     page.get(url, retry=1, interval=1, timeout=timeout)
     page._wait_loaded(wait)
+
+
+def close_known_popups(page: Any) -> bool:
+    script = r'''
+(() => {
+  const labels = ['\u6211\u77e5\u9053\u4e86', '\u786e\u5b9a', '\u5173\u95ed'];
+  const visible = el => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+  };
+  let clicked = false;
+  for (const el of [...document.querySelectorAll('a, button, span, div')]) {
+    const text = (el.innerText || el.textContent || '').trim();
+    if (!visible(el) || !labels.some(label => text.includes(label))) continue;
+    el.scrollIntoView({block: 'center', inline: 'center'});
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      el.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window}));
+    }
+    clicked = true;
+    break;
+  }
+  return clicked;
+})()
+'''
+    try:
+        clicked = bool(page.run_js(script))
+    except Exception:
+        clicked = False
+    if clicked:
+        time.sleep(0.8)
+    return clicked
+
+
+def wait_for_followed_forum_content(page: Any, timeout: int | None = None) -> str:
+    timeout = timeout or env_int(
+        "TIEBA_FOLLOWED_WAIT_SECONDS",
+        DEFAULT_FOLLOWED_FORUM_WAIT_SECONDS,
+        minimum=1,
+    )
+    deadline = time.time() + timeout
+    last_html = page_html(page)
+    while time.time() < deadline:
+        close_known_popups(page)
+        last_html = page_html(page)
+        if parse_forums_from_html(last_html):
+            return last_html
+        if not has_followed_forum_list(last_html):
+            return last_html
+        time.sleep(1)
+    return last_html
 
 
 def page_url(page: Any) -> str:
@@ -576,7 +628,7 @@ def click_old_version_switch(page: Any) -> bool:
 
 def open_followed_forum_index(page: Any) -> str:
     open_page(page, FOLLOWED_FORUM_URL, timeout=20, wait=8)
-    html = page_html(page)
+    html = wait_for_followed_forum_content(page)
     if has_followed_forum_list(html):
         return html
 
@@ -590,7 +642,7 @@ def open_followed_forum_index(page: Any) -> str:
     else:
         progress("Old-version switch was not found; reopening the old followed-forum URL directly.")
     open_page(page, FOLLOWED_FORUM_URL, timeout=20, wait=8)
-    html = page_html(page)
+    html = wait_for_followed_forum_content(page)
     if not has_followed_forum_list(html):
         progress("Followed forum list is still not visible after opening the old followed-forum URL.")
     return html
@@ -632,7 +684,8 @@ def click_followed_forum_pagination(page: Any, page_number: int | None = None, t
         page._wait_loaded(8)
     except Exception:
         pass
-    return has_followed_forum_list(page_html(page))
+    html = wait_for_followed_forum_content(page)
+    return has_followed_forum_list(html)
 
 
 def verify_followed_forum_tail_page(page: Any, reported_pages: int) -> int:
@@ -653,12 +706,12 @@ def verify_followed_forum_tail_page(page: Any, reported_pages: int) -> int:
 def open_next_followed_forum_page(page: Any, page_number: int) -> str:
     progress(f"Clicking followed forum pagination to page {page_number}...")
     if click_followed_forum_pagination(page, page_number=page_number):
-        return page_html(page)
+        return wait_for_followed_forum_content(page)
     if click_followed_forum_pagination(page, text=NEXT_PAGE_TEXT):
-        return page_html(page)
+        return wait_for_followed_forum_content(page)
     progress(f"Could not click page {page_number}; falling back to the old followed-forum URL.")
     open_page(page, f"{FOLLOWED_FORUM_URL}?&pn={page_number}", timeout=20, wait=8)
-    return page_html(page)
+    return wait_for_followed_forum_content(page)
 
 
 def collect_followed_forums(page: Any) -> list[Forum]:
@@ -701,7 +754,7 @@ def collect_followed_forums(page: Any) -> list[Forum]:
                 progress(f"Retrying followed forum page {page_number} ({retry}/{page_retries})...")
                 sleep_between_actions()
                 open_page(page, f"{FOLLOWED_FORUM_URL}?&pn={page_number}", timeout=20, wait=8)
-                html = page_html(page)
+                html = wait_for_followed_forum_content(page)
                 page_forums = parse_forums_from_html(html)
                 progress(f"Page {page_number} retry {retry} found {len(page_forums)} forum link(s).")
                 if page_forums:
@@ -881,6 +934,11 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
                 f"{page_diagnostic_line(page, html)}"
             )
             save_diagnostic(page, f"forum-{forum.name}-unknown-attempt-{attempt}", html)
+            progress(f"{forum.name} page was unknown; trying to switch this forum page to the old UI.")
+            if click_old_version_switch(page):
+                time.sleep(1.5)
+                ui = detect_forum_ui(page)
+                progress(f"{forum.name} forum page UI after old-version switch: {ui}.")
 
         if ui == "new":
             button = find_new_ui_sign_button(page)
