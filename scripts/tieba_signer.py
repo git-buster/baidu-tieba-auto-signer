@@ -39,7 +39,6 @@ SECURITY_MARKERS = (
     "\u9a8c\u8bc1\u7801",
     "\u8bf7\u8f93\u5165\u9a8c\u8bc1\u7801",
     "wappass.baidu.com",
-    "passport.baidu.com",
 )
 
 
@@ -287,10 +286,10 @@ def diagnostic_slug(value: str, limit: int = 80) -> str:
 def detect_page_issue(page: Any, html: str | None = None) -> str:
     html = page_html(page) if html is None else html
     haystack = "\n".join((page_url(page), page_title(page), html))
+    if not is_logged_in_html(html):
+        return "page shows logged-out state"
     if any(marker in haystack for marker in SECURITY_MARKERS):
         return "possible security verification or login challenge"
-    if not is_logged_in_html(html):
-        return "page does not look logged in"
     return "no obvious challenge marker"
 
 
@@ -962,14 +961,20 @@ def sign_account(label: str, cookies: list[dict[str, Any]]) -> AccountResult:
         progress(f"Injecting cookies for {label}...")
         inject_cookies(page, cookies)
         if not is_logged_in(page):
-            html = page_html(page)
-            diagnostic = page_diagnostic_line(page, html)
-            progress(f"{label} login diagnostic: {diagnostic}")
-            save_diagnostic(page, f"{label}-not-logged-in", html)
-            details.append("Cookie was injected, but Tieba still looks logged out.")
-            details.append(cookie_login_hint(cookies))
-            details.append(diagnostic)
-            return AccountResult(label, False, "not logged in after cookie injection", details)
+            home_html = page_html(page)
+            progress(f"{label} homepage login diagnostic: {page_diagnostic_line(page, home_html)}")
+            save_diagnostic(page, f"{label}-homepage-not-logged-in", home_html)
+            progress("Homepage looked logged out; checking the old followed-forum page before failing.")
+            followed_html = open_followed_forum_index(page)
+            if not has_followed_forum_list(followed_html):
+                diagnostic = page_diagnostic_line(page, followed_html)
+                progress(f"{label} followed-forum login diagnostic: {diagnostic}")
+                save_diagnostic(page, f"{label}-followed-forum-not-logged-in", followed_html)
+                details.append("Cookie was injected, but Tieba still looks logged out.")
+                details.append(cookie_login_hint(cookies))
+                details.append(diagnostic)
+                return AccountResult(label, False, "not logged in after cookie injection", details)
+            progress("Old followed-forum page is visible; continuing despite the new homepage login state.")
 
         forums = collect_followed_forums(page)
         details.append(f"Found {len(forums)} followed forum(s).")
