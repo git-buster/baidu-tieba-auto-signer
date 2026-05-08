@@ -30,6 +30,7 @@ STREAK_SIGN_TEXT = "\u8fde\u7b7e"
 OLD_VERSION_TEXTS = ("\u65e7\u7248", "\u8001\u7248", "\u8fd4\u56de\u65e7\u7248")
 TAIL_PAGE_TEXT = "\u5c3e\u9875"
 NEXT_PAGE_TEXT = "\u4e0b\u4e00\u9875"
+SIGNED_CLASS_MARKERS = ("signstar_signed", "sign_box_bright_signed", "sign_btn_signed")
 
 
 class TiebaError(RuntimeError):
@@ -272,6 +273,34 @@ def text_indicates_signed(text: str) -> bool:
         or STREAK_SIGN_TEXT in text
         or "already signed" in text.lower()
     )
+
+
+def class_indicates_signed(class_name: str) -> bool:
+    return any(marker in class_name for marker in SIGNED_CLASS_MARKERS)
+
+
+def html_indicates_signed(html: str) -> bool:
+    soup = BeautifulSoup(html, "html.parser")
+
+    old_widget = soup.select_one("#signstar_wrapper")
+    if old_widget:
+        old_classes = " ".join(old_widget.get("class", []))
+        old_text = old_widget.get_text(" ", strip=True)
+        if class_indicates_signed(old_classes) or text_indicates_signed(old_text):
+            return True
+        sign_link = old_widget.select_one("a")
+        if sign_link:
+            link_classes = " ".join(sign_link.get("class", []))
+            link_text = sign_link.get_text(" ", strip=True)
+            if class_indicates_signed(link_classes) or text_indicates_signed(link_text):
+                return True
+
+    for element in soup.select(".follow-sign, .operate-btn"):
+        text = element.get_text(" ", strip=True)
+        if STREAK_SIGN_TEXT in text or SIGNED_TEXT in text:
+            return True
+
+    return False
 
 
 def is_logged_in(page: Any) -> bool:
@@ -596,23 +625,20 @@ def collect_followed_forums(page: Any) -> list[Forum]:
 
 def already_signed(page: Any) -> bool:
     html = page_html(page)
-    if "signstar_signed" in html or "sign_box_bright_signed" in html:
+    if html_indicates_signed(html):
         return True
-    if text_indicates_signed(html) or "\u7b7e\u5230\u6392\u540d" in html:
-        return True
-    for xpath in (
-        'xpath://*[@id="signstar_wrapper"]/a/span[1]',
-        f'xpath://span[contains(text(), "{CONTINUOUS_SIGN_TEXT}")]',
-        f'xpath://span[contains(text(), "{STREAK_SIGN_TEXT}")]',
-        f'xpath://span[contains(text(), "{SIGNED_TEXT}")]',
+    for selector in (
+        "css:#signstar_wrapper",
         'css:.follow-sign',
+        "css:.operate-btn",
     ):
         try:
-            element = page.ele(xpath, timeout=1)
+            element = page.ele(selector, timeout=1)
         except Exception:
             element = None
         text = safe_text(element)
-        if text_indicates_signed(text):
+        class_name = safe_attr(element, "class")
+        if class_indicates_signed(class_name) or text_indicates_signed(text):
             return True
     return False
 
@@ -653,7 +679,7 @@ def find_old_ui_sign_button(page: Any) -> Any | None:
         text = safe_text(element)
         if not element:
             continue
-        if "signstar_signed" in class_name or "sign_btn_signed" in class_name:
+        if class_indicates_signed(class_name):
             continue
         if text_indicates_signed(text):
             continue

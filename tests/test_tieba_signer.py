@@ -1,5 +1,6 @@
 from scripts.tieba_signer import (
     decode_forum_name,
+    html_indicates_signed,
     parse_followed_forum_pagination,
     parse_followed_forum_total_pages,
     parse_forums_from_html,
@@ -60,6 +61,38 @@ def test_parse_ignores_non_followed_links() -> None:
 
 def test_new_ui_streak_text_means_signed() -> None:
     assert text_indicates_signed("连签1天")
+
+
+def test_new_ui_signed_state_accepts_any_streak_days() -> None:
+    html = '<div class="follow-sign">连签28天</div>'
+    assert html_indicates_signed(html)
+
+
+def test_old_ui_signed_state_accepts_signed_text() -> None:
+    html = '<div id="signstar_wrapper"><a class="j_signbtn">已签到 连续7天</a></div>'
+    assert html_indicates_signed(html)
+
+
+def test_old_ui_signed_state_accepts_signed_class_without_signed_text() -> None:
+    html = (
+        '<div id="signstar_wrapper" class="sign_box_bright_signed">'
+        '<a class="j_signbtn signstar_signed">05月08日 漏签6天 连续1天</a>'
+        "</div>"
+    )
+    assert html_indicates_signed(html)
+
+
+def test_sign_rank_alone_is_not_signed() -> None:
+    assert not html_indicates_signed("<div>签到排名</div>")
+
+
+def test_old_ui_signable_state_is_not_signed() -> None:
+    html = (
+        '<div id="signstar_wrapper" class="sign_box_bright">'
+        '<a class="j_signbtn sign_btn_bright j_cansign">05月08日 漏签0天</a>'
+        "</div>"
+    )
+    assert not html_indicates_signed(html)
 
 
 def test_parse_followed_forum_total_pages_from_tail_link() -> None:
