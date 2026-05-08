@@ -395,6 +395,35 @@ def parse_followed_forum_pagination(html: str) -> dict[str, Any] | None:
 
 
 def click_old_version_switch(page: Any) -> bool:
+    script = r'''
+(() => {
+  const labels = ['\u65e7\u7248', '\u8001\u7248', '\u8fd4\u56de\u65e7\u7248'];
+  const visible = el => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+  };
+  const byIcon = document.querySelector('use[href="#back_old"], use[xlink\\:href="#back_old"]');
+  const iconTarget = byIcon ? byIcon.closest('.menu-item, button, a, [role="button"], div') : null;
+  const byText = [...document.querySelectorAll('a, button, [role="button"], span, div')]
+    .find(el => visible(el) && labels.some(label => (el.innerText || el.textContent || '').includes(label)));
+  const target = iconTarget || (byText ? byText.closest('a, button, [role="button"]') || byText : null);
+  if (!target || !visible(target)) return false;
+  target.scrollIntoView({block: 'center', inline: 'center'});
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window}));
+  }
+  return true;
+})()
+'''
+    try:
+        clicked = bool(page.run_js(script))
+    except Exception:
+        clicked = False
+    if clicked:
+        time.sleep(1.5)
+        return True
+
     for text in OLD_VERSION_TEXTS:
         for selector in (
             f'xpath://a[contains(text(), "{text}")]',
@@ -412,34 +441,7 @@ def click_old_version_switch(page: Any) -> bool:
                     return True
                 except Exception:
                     continue
-
-    script = r'''
-(() => {
-  const labels = ['\u65e7\u7248', '\u8001\u7248', '\u8fd4\u56de\u65e7\u7248'];
-  const visible = el => {
-    const r = el.getBoundingClientRect();
-    const s = getComputedStyle(el);
-    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
-  };
-  const nodes = [...document.querySelectorAll('a, button, [role="button"], span, div')]
-    .filter(el => visible(el) && labels.some(label => (el.innerText || el.textContent || '').includes(label)));
-  const node = nodes[0];
-  if (!node) return false;
-  const target = node.closest('a, button, [role="button"]') || node;
-  target.scrollIntoView({block: 'center', inline: 'center'});
-  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-    target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window}));
-  }
-  return true;
-})()
-'''
-    try:
-        clicked = bool(page.run_js(script))
-    except Exception:
-        clicked = False
-    if clicked:
-        time.sleep(1.5)
-    return clicked
+    return False
 
 
 def open_followed_forum_index(page: Any) -> str:
@@ -458,7 +460,10 @@ def open_followed_forum_index(page: Any) -> str:
     else:
         progress("Old-version switch was not found; reopening the old followed-forum URL directly.")
     open_page(page, FOLLOWED_FORUM_URL, timeout=20, wait=8)
-    return page_html(page)
+    html = page_html(page)
+    if not has_followed_forum_list(html):
+        progress("Followed forum list is still not visible after opening the old followed-forum URL.")
+    return html
 
 
 def click_followed_forum_pagination(page: Any, page_number: int | None = None, text: str = "") -> bool:
