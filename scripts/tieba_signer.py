@@ -256,6 +256,15 @@ def safe_text(element: Any) -> str:
         return ""
 
 
+def safe_attr(element: Any, name: str) -> str:
+    if not element:
+        return ""
+    try:
+        return str(element.attr(name) or "")
+    except Exception:
+        return ""
+
+
 def text_indicates_signed(text: str) -> bool:
     return (
         SIGNED_TEXT in text
@@ -403,7 +412,8 @@ def click_old_version_switch(page: Any) -> bool:
     const s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
   };
-  const byIcon = document.querySelector('use[href="#back_old"], use[xlink\\:href="#back_old"]');
+  const byIcon = [...document.querySelectorAll('use')]
+    .find(el => (el.getAttribute('href') || el.getAttribute('xlink:href') || '') === '#back_old');
   const iconTarget = byIcon ? byIcon.closest('.menu-item, button, a, [role="button"], div') : null;
   const byText = [...document.querySelectorAll('a, button, [role="button"], span, div')]
     .find(el => visible(el) && labels.some(label => (el.innerText || el.textContent || '').includes(label)));
@@ -586,6 +596,8 @@ def collect_followed_forums(page: Any) -> list[Forum]:
 
 def already_signed(page: Any) -> bool:
     html = page_html(page)
+    if "signstar_signed" in html or "sign_box_bright_signed" in html:
+        return True
     if text_indicates_signed(html) or "\u7b7e\u5230\u6392\u540d" in html:
         return True
     for xpath in (
@@ -626,19 +638,37 @@ def detect_forum_ui(page: Any) -> str:
 
 
 def find_old_ui_sign_button(page: Any) -> Any | None:
-    selectors = (
+    class_selectors = (
         'xpath://a[contains(@class, "j_signbtn") and not(contains(@class, "sign_btn_signed"))]',
         'xpath://a[contains(@class, "sign_btn_bright")]',
         'xpath://a[contains(@class, "j_cansign")]',
         'xpath://*[@id="signstar_wrapper"]//a[contains(@class, "sign")]',
-        f'xpath://a[contains(text(), "{SIGN_TEXT}")]',
     )
-    for selector in selectors:
+    for selector in class_selectors:
         try:
             element = page.ele(selector, timeout=2)
         except Exception:
             element = None
-        if element and SIGN_TEXT in safe_text(element) and not text_indicates_signed(safe_text(element)):
+        class_name = safe_attr(element, "class")
+        text = safe_text(element)
+        if not element:
+            continue
+        if "signstar_signed" in class_name or "sign_btn_signed" in class_name:
+            continue
+        if text_indicates_signed(text):
+            continue
+        return element
+
+    text_selectors = (
+        f'xpath://a[contains(text(), "{SIGN_TEXT}")]',
+    )
+    for selector in text_selectors:
+        try:
+            element = page.ele(selector, timeout=2)
+        except Exception:
+            element = None
+        text = safe_text(element)
+        if element and SIGN_TEXT in text and not text_indicates_signed(text):
             return element
     return None
 
