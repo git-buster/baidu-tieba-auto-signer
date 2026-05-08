@@ -294,6 +294,25 @@ def detect_page_issue(page: Any, html: str | None = None) -> str:
     return "no obvious challenge marker"
 
 
+def page_text_excerpt(html: str, limit: int = 1000) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+    for node in soup(("script", "style", "noscript")):
+        node.decompose()
+    text = soup.get_text(" ", strip=True)
+    text = re.sub(r"\s+", " ", text)
+    return text[:limit]
+
+
+def page_diagnostic_line(page: Any, html: str | None = None, limit: int = 1000) -> str:
+    html = page_html(page) if html is None else html
+    return (
+        f"diagnosis={detect_page_issue(page, html)}; "
+        f"url={page_url(page)}; "
+        f"title={page_title(page)}; "
+        f"text={page_text_excerpt(html, limit)}"
+    )
+
+
 def save_diagnostic(page: Any, label: str, html: str | None = None) -> None:
     if not env_bool("TIEBA_SAVE_DIAGNOSTICS", True):
         return
@@ -303,12 +322,13 @@ def save_diagnostic(page: Any, label: str, html: str | None = None) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         name = diagnostic_slug(label)
         (directory / f"{name}.html").write_text(html, encoding="utf-8", errors="ignore")
-        (directory / f"{name}.txt").write_text(
+        diagnostic_text = (
             f"url={page_url(page)}\n"
             f"title={page_title(page)}\n"
-            f"diagnosis={detect_page_issue(page, html)}\n",
-            encoding="utf-8",
+            f"diagnosis={detect_page_issue(page, html)}\n"
+            f"text={page_text_excerpt(html, 3000)}\n"
         )
+        (directory / f"{name}.txt").write_text(diagnostic_text, encoding="utf-8")
         try:
             page.get_screenshot(path=str(directory), name=f"{name}.png", full_page=True)
         except Exception as exc:
@@ -675,7 +695,7 @@ def collect_followed_forums(page: Any) -> list[Forum]:
         if not page_forums:
             progress(
                 f"Followed forum page {page_number} was empty; "
-                f"{detect_page_issue(page, html)}. url={page_url(page)} title={page_title(page)}"
+                f"{page_diagnostic_line(page, html)}"
             )
             save_diagnostic(page, f"followed-page-{page_number}-empty", html)
             for retry in range(1, page_retries + 1):
@@ -857,10 +877,9 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
         progress(f"{forum.name} forum page UI detected: {ui}.")
         if ui == "unknown":
             html = page_html(page)
-            diagnosis = detect_page_issue(page, html)
             progress(
-                f"{forum.name} unknown page diagnosis: {diagnosis}. "
-                f"url={page_url(page)} title={page_title(page)}"
+                f"{forum.name} unknown page diagnostic: "
+                f"{page_diagnostic_line(page, html)}"
             )
             save_diagnostic(page, f"forum-{forum.name}-unknown-attempt-{attempt}", html)
 
@@ -906,7 +925,7 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
                 else:
                     last_message = "old UI clicked but sign state was not confirmed"
         else:
-            diagnosis = detect_page_issue(page)
+            diagnosis = page_diagnostic_line(page)
             button = find_new_ui_sign_button(page) or find_old_ui_sign_button(page)
             if button:
                 try:
@@ -943,8 +962,13 @@ def sign_account(label: str, cookies: list[dict[str, Any]]) -> AccountResult:
         progress(f"Injecting cookies for {label}...")
         inject_cookies(page, cookies)
         if not is_logged_in(page):
+            html = page_html(page)
+            diagnostic = page_diagnostic_line(page, html)
+            progress(f"{label} login diagnostic: {diagnostic}")
+            save_diagnostic(page, f"{label}-not-logged-in", html)
             details.append("Cookie was injected, but Tieba still looks logged out.")
             details.append(cookie_login_hint(cookies))
+            details.append(diagnostic)
             return AccountResult(label, False, "not logged in after cookie injection", details)
 
         forums = collect_followed_forums(page)
