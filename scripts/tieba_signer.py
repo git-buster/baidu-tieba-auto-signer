@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote_to_bytes
 
@@ -31,6 +32,15 @@ OLD_VERSION_TEXTS = ("\u65e7\u7248", "\u8001\u7248", "\u8fd4\u56de\u65e7\u7248")
 TAIL_PAGE_TEXT = "\u5c3e\u9875"
 NEXT_PAGE_TEXT = "\u4e0b\u4e00\u9875"
 SIGNED_CLASS_MARKERS = ("signstar_signed", "sign_box_bright_signed", "sign_btn_signed")
+DIAGNOSTICS_DIR = os.getenv("TIEBA_DIAGNOSTICS_DIR", "tieba_diagnostics")
+SECURITY_MARKERS = (
+    "\u767e\u5ea6\u5b89\u5168\u9a8c\u8bc1",
+    "\u5b89\u5168\u9a8c\u8bc1",
+    "\u9a8c\u8bc1\u7801",
+    "\u8bf7\u8f93\u5165\u9a8c\u8bc1\u7801",
+    "wappass.baidu.com",
+    "passport.baidu.com",
+)
 
 
 class TiebaError(RuntimeError):
@@ -261,6 +271,52 @@ def page_url(page: Any) -> str:
     return str(url() if callable(url) else url or "")
 
 
+def page_title(page: Any) -> str:
+    title = getattr(page, "title", "")
+    try:
+        return str(title() if callable(title) else title or "").strip()
+    except Exception:
+        return ""
+
+
+def diagnostic_slug(value: str, limit: int = 80) -> str:
+    slug = re.sub(r"[^0-9A-Za-z._-]+", "_", value).strip("._-")
+    return (slug or "page")[:limit]
+
+
+def detect_page_issue(page: Any, html: str | None = None) -> str:
+    html = page_html(page) if html is None else html
+    haystack = "\n".join((page_url(page), page_title(page), html))
+    if any(marker in haystack for marker in SECURITY_MARKERS):
+        return "possible security verification or login challenge"
+    if not is_logged_in_html(html):
+        return "page does not look logged in"
+    return "no obvious challenge marker"
+
+
+def save_diagnostic(page: Any, label: str, html: str | None = None) -> None:
+    if not env_bool("TIEBA_SAVE_DIAGNOSTICS", True):
+        return
+    html = page_html(page) if html is None else html
+    directory = Path(DIAGNOSTICS_DIR)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        name = diagnostic_slug(label)
+        (directory / f"{name}.html").write_text(html, encoding="utf-8", errors="ignore")
+        (directory / f"{name}.txt").write_text(
+            f"url={page_url(page)}\n"
+            f"title={page_title(page)}\n"
+            f"diagnosis={detect_page_issue(page, html)}\n",
+            encoding="utf-8",
+        )
+        try:
+            page.get_screenshot(path=str(directory), name=f"{name}.png", full_page=True)
+        except Exception as exc:
+            progress(f"Could not save screenshot for {label}: {exc}")
+    except Exception as exc:
+        progress(f"Could not save diagnostic for {label}: {exc}")
+
+
 def safe_text(element: Any) -> str:
     if not element:
         return ""
@@ -316,13 +372,16 @@ def html_indicates_signed(html: str) -> bool:
     return False
 
 
-def is_logged_in(page: Any) -> bool:
-    html = page_html(page)
+def is_logged_in_html(html: str) -> bool:
     logged_out_markers = ("登录百度账号", "立即登录", "name=\"userName\"")
     logged_in_markers = ("我的贴吧", "退出", "个人中心", "i/i/forum")
     return any(marker in html for marker in logged_in_markers) and not any(
         marker in html for marker in logged_out_markers
     )
+
+
+def is_logged_in(page: Any) -> bool:
+    return is_logged_in_html(page_html(page))
 
 
 def inject_cookies(page: Any, cookies: list[dict[str, Any]]) -> None:
@@ -587,15 +646,18 @@ def collect_followed_forums(page: Any) -> list[Forum]:
     max_pages = env_int("TIEBA_MAX_PAGES", 100, minimum=1)
     max_forums = env_int("TIEBA_MAX_FORUMS", 0, minimum=0)
     empty_pages_to_stop = env_int("TIEBA_EMPTY_PAGES_TO_STOP", 1, minimum=1)
+    page_retries = env_int("TIEBA_PAGE_RETRIES", 2, minimum=0)
     forums: list[Forum] = []
     seen: set[str] = set()
     empty_pages = 0
     page_number = 1
     scan_pages = max_pages
+    pagination_known = False
 
     html = open_followed_forum_index(page)
     pagination = parse_followed_forum_pagination(html)
     if pagination:
+        pagination_known = True
         total_pages = int(pagination["total_pages"])
         if str(pagination["tail_url"]) and total_pages > 1:
             total_pages = verify_followed_forum_tail_page(page, total_pages)
@@ -611,8 +673,25 @@ def collect_followed_forums(page: Any) -> list[Forum]:
         progress(f"Page {page_number} found {len(page_forums)} forum link(s).")
 
         if not page_forums:
+            progress(
+                f"Followed forum page {page_number} was empty; "
+                f"{detect_page_issue(page, html)}. url={page_url(page)} title={page_title(page)}"
+            )
+            save_diagnostic(page, f"followed-page-{page_number}-empty", html)
+            for retry in range(1, page_retries + 1):
+                progress(f"Retrying followed forum page {page_number} ({retry}/{page_retries})...")
+                sleep_between_actions()
+                open_page(page, f"{FOLLOWED_FORUM_URL}?&pn={page_number}", timeout=20, wait=8)
+                html = page_html(page)
+                page_forums = parse_forums_from_html(html)
+                progress(f"Page {page_number} retry {retry} found {len(page_forums)} forum link(s).")
+                if page_forums:
+                    break
+                save_diagnostic(page, f"followed-page-{page_number}-empty-retry-{retry}", html)
+
+        if not page_forums:
             empty_pages += 1
-            if empty_pages >= empty_pages_to_stop:
+            if not pagination_known and empty_pages >= empty_pages_to_stop:
                 progress(f"Stopping forum scan after {empty_pages} empty page(s).")
                 break
             page_number += 1
@@ -776,6 +855,14 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
 
         ui = detect_forum_ui(page)
         progress(f"{forum.name} forum page UI detected: {ui}.")
+        if ui == "unknown":
+            html = page_html(page)
+            diagnosis = detect_page_issue(page, html)
+            progress(
+                f"{forum.name} unknown page diagnosis: {diagnosis}. "
+                f"url={page_url(page)} title={page_title(page)}"
+            )
+            save_diagnostic(page, f"forum-{forum.name}-unknown-attempt-{attempt}", html)
 
         if ui == "new":
             button = find_new_ui_sign_button(page)
@@ -819,6 +906,7 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
                 else:
                     last_message = "old UI clicked but sign state was not confirmed"
         else:
+            diagnosis = detect_page_issue(page)
             button = find_new_ui_sign_button(page) or find_old_ui_sign_button(page)
             if button:
                 try:
@@ -840,7 +928,7 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
                     return SignResult(forum.name, True, "signed")
                 last_message = "unknown UI fallback click was sent but sign state was not confirmed"
             else:
-                last_message = "forum UI and sign button not found"
+                last_message = f"forum UI and sign button not found; {diagnosis}"
 
         if attempt < retries:
             sleep_between_actions()
