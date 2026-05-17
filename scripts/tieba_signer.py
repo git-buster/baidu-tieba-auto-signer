@@ -338,11 +338,16 @@ def diagnostic_slug(value: str, limit: int = 80) -> str:
 def detect_page_issue(page: Any, html: str | None = None) -> str:
     html = page_html(page) if html is None else html
     haystack = "\n".join((page_url(page), page_title(page), html))
-    if not is_logged_in_html(html):
-        return "page shows logged-out state"
     if any(marker in haystack for marker in SECURITY_MARKERS):
         return "possible security verification or login challenge"
+    if not is_logged_in_html(html):
+        return "page shows logged-out state"
     return "no obvious challenge marker"
+
+
+def page_has_security_challenge(page: Any, html: str | None = None) -> bool:
+    html = page_html(page) if html is None else html
+    return detect_page_issue(page, html) == "possible security verification or login challenge"
 
 
 def page_text_excerpt(html: str, limit: int = 1000) -> str:
@@ -929,6 +934,11 @@ def sign_one_forum(page: Any, forum: Forum) -> SignResult:
         progress(f"{forum.name} forum page UI detected: {ui}.")
         if ui == "unknown":
             html = page_html(page)
+            if page_has_security_challenge(page, html):
+                diagnostic = page_diagnostic_line(page, html)
+                progress(f"{forum.name} blocked by Baidu security verification: {diagnostic}")
+                save_diagnostic(page, f"forum-{forum.name}-security-attempt-{attempt}", html)
+                return SignResult(forum.name, False, f"blocked by Baidu security verification; {diagnostic}")
             progress(
                 f"{forum.name} unknown page diagnostic: "
                 f"{page_diagnostic_line(page, html)}"
@@ -1042,6 +1052,7 @@ def sign_account(label: str, cookies: list[dict[str, Any]]) -> AccountResult:
         signed = 0
         already = 0
         failed = 0
+        stop_on_security = env_bool("TIEBA_STOP_ON_SECURITY", True)
         for index, forum in enumerate(forums, start=1):
             progress(f"Progress {index}/{len(forums)}: {forum.name}")
             result = sign_one_forum(page, forum)
@@ -1055,6 +1066,10 @@ def sign_account(label: str, cookies: list[dict[str, Any]]) -> AccountResult:
                 f"{'OK' if result.ok else 'FAIL'} {result.forum}: {result.message}"
             )
             progress(f"{'OK' if result.ok else 'FAIL'} {result.forum}: {result.message}")
+            if stop_on_security and "Baidu security verification" in result.message:
+                details.append("Stopped remaining forums because Baidu showed a security verification page.")
+                progress("Stopping this account because Baidu showed a security verification page.")
+                break
             if index < len(forums):
                 sleep_between_actions()
 
